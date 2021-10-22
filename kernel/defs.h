@@ -63,6 +63,7 @@ void            ramdiskrw(struct buf*);
 void*           kalloc(void);
 void            kfree(void *);
 void            kinit(void);
+uint64          kfreemem_count(void); // 这一块的函数名都在 kalloc.c（内存分配器）中，就把函数名放在这里
 
 // log.c
 void            initlog(int, struct superblock*);
@@ -104,6 +105,8 @@ void            yield(void);
 int             either_copyout(int user_dst, uint64 dst, void *src, uint64 len);
 int             either_copyin(void *dst, int user_src, uint64 src, uint64 len);
 void            procdump(void);
+uint64          nproc_count(void); // 这一块的函数名都在 proc.c（内存分配器）中，就把函数名放在这里
+uint64          freefd_count(void);
 
 // swtch.S
 void            swtch(struct context*, struct context*);

@@ -37,7 +37,7 @@ argraw(int n)
   struct proc *p = myproc();
   switch (n) {
   case 0:
-    return p->trapframe->a0;
+    return p->trapframe->a0; // a0 是第一个参数的存放位置
   case 1:
     return p->trapframe->a1;
   case 2:
@@ -57,7 +57,7 @@ argraw(int n)
 int
 argint(int n, int *ip)
 {
-  *ip = argraw(n);
+  *ip = argraw(n); // 从 argraw 中把 原始参数转为 int 型输入
   return 0;
 }
 
@@ -104,7 +104,10 @@ extern uint64 sys_unlink(void);
 extern uint64 sys_wait(void);
 extern uint64 sys_write(void);
 extern uint64 sys_uptime(void);
+extern uint64 sys_trace(void);    // 引入 sysproc.c 中的函数
+extern uint64 sys_sysinfo(void);  // 引入 sysproc.c 中的函数
 
+// 函数指针数组，指针名叫 syscalls，void 是函数参数，数组下标是系统调用号
 static uint64 (*syscalls[])(void) = {
 [SYS_fork]    sys_fork,
 [SYS_exit]    sys_exit,
@@ -127,6 +130,36 @@ static uint64 (*syscalls[])(void) = {
 [SYS_link]    sys_link,
 [SYS_mkdir]   sys_mkdir,
 [SYS_close]   sys_close,
+[SYS_trace]   sys_trace, // 用一个函数指针数组保存 sysproc.c 里的函数名，用于调用
+[SYS_sysinfo] sys_sysinfo, 
+};
+
+// An array of system call names to index into
+// 添加一个系统调用名字的数组，使每个系统调用都可以输出信息
+static char *syscall_names[] = {
+  [SYS_fork]    "fork",
+  [SYS_exit]    "exit",
+  [SYS_wait]    "wait",
+  [SYS_pipe]    "pipe",
+  [SYS_read]    "read",
+  [SYS_kill]    "kill",
+  [SYS_exec]    "exec",
+  [SYS_fstat]   "fstat",
+  [SYS_chdir]   "chdir",
+  [SYS_dup]     "dup",
+  [SYS_getpid]  "getpid",
+  [SYS_sbrk]    "sbrk",
+  [SYS_sleep]   "sleep",
+  [SYS_uptime]  "uptime",
+  [SYS_open]    "open",
+  [SYS_write]   "write",
+  [SYS_mknod]   "mknod",
+  [SYS_unlink]  "unlink",
+  [SYS_link]    "link",
+  [SYS_mkdir]   "mkdir",
+  [SYS_close]   "close",
+  [SYS_trace]   "trace",
+  [SYS_sysinfo] "sysinfo",
 };
 
 void
@@ -134,10 +167,16 @@ syscall(void)
 {
   int num;
   struct proc *p = myproc();
+  int arg0 = p->trapframe->a0; //保存函数调用的第一个参数
 
   num = p->trapframe->a7;
   if(num > 0 && num < NELEM(syscalls) && syscalls[num]) {
-    p->trapframe->a0 = syscalls[num]();
+    p->trapframe->a0 = syscalls[num](); // 将返回值存到 a0
+
+    if (p->trace_mask & (1 << num)) { // 当 mask 拉高的位 和 num 对应的位相同时，输出提示信息
+      printf("%d: sys_%s(%d) -> %d\n", 
+            p->pid, syscall_names[num], arg0, p->trapframe->a0); // 打印系统调用的信息
+    }
   } else {
     printf("%d %s: unknown sys call %d\n",
             p->pid, p->name, num);

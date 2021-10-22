@@ -54,12 +54,12 @@ kfree(void *pa)
   // Fill with junk to catch dangling refs.
   memset(pa, 1, PGSIZE);
 
-  r = (struct run*)pa;
+  r = (struct run*)pa; // 一次只 free 一个 page
 
-  acquire(&kmem.lock);
+  acquire(&kmem.lock); // PV 锁
   r->next = kmem.freelist;
   kmem.freelist = r;
-  release(&kmem.lock);
+  release(&kmem.lock); // PV 锁
 }
 
 // Allocate one 4096-byte page of physical memory.
@@ -79,4 +79,23 @@ kalloc(void)
   if(r)
     memset((char*)r, 5, PGSIZE); // fill with junk
   return (void*)r;
+}
+
+// Returns the amount of free memory
+// 参照上面的 kfree 写的用于计算分配的 mem 的函数
+uint64
+kfreemem_count(void)
+{
+  struct run *r; // 看前面的得知 r是一个用来遍历的迭代器
+  uint64 kfreemem_size = 0;
+
+  acquire(&kmem.lock); // PV 锁
+  r = kmem.freelist; // freelist 里存放了申请的所有 page（用链表）
+  while (r) {
+    kfreemem_size += PGSIZE; // 每个申请的 page 大小都是 4096
+    r = r->next;
+  }
+  release(&kmem.lock); // PV 锁
+
+  return kfreemem_size;
 }

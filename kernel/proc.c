@@ -280,6 +280,10 @@ fork(void)
   // copy saved user registers.
   *(np->trapframe) = *(p->trapframe);
 
+  // copy the trace mask. 
+  // 用以继承父进程的 mask，需要先在 proc.h 中声明 trace_mask
+  np->trace_mask = p->trace_mask;
+
   // Cause fork to return 0 in the child.
   np->trapframe->a0 = 0;
 
@@ -693,3 +697,40 @@ procdump(void)
     printf("\n");
   }
 }
+
+// Returns the number of processes whose state
+// is UNUSED
+// 参照上面的 procdump 写的用于计算 空闲进程数量 的函数
+uint64
+nproc_count(void) 
+{
+  uint64 nproc_num = 0;
+  struct proc *p; // 迭代器，用来遍历进程上下文 PCB
+
+  for (p = proc; p < &proc[NPROC]; p++) {
+    acquire(&p->lock); // PV 锁
+    if (p->state == UNUSED) // 计数，记录空闲进程
+      nproc_num++; 
+    release(&p->lock); // PV 锁
+  }
+
+  return nproc_num;
+} 
+
+// Returns the number of free file discriptor 
+// 参照上面的 exit 写的用于计算 空闲文件描述符 的函数
+uint64
+freefd_count(void) 
+{
+  uint64 freefd_num = 0;
+  struct proc *p = myproc(); // 指向当前进程
+
+  acquire(&p->lock); // PV 锁
+  for(int fd = 0; fd < NOFILE; fd++){ // 遍历 ofile 指针数组
+    if(p->ofile[fd] == 0) // 仿造 exit() 写法
+      freefd_num++;
+  }
+  release(&p->lock); // PV 锁
+
+  return freefd_num;
+} 

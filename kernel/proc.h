@@ -103,4 +103,7 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+
+  // 声明 kernel 进程的 mask 变量
+  int trace_mask;              // Bits specify which system calls to trace
 };

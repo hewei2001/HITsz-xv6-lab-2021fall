@@ -6,6 +6,7 @@
 #include "memlayout.h"
 #include "spinlock.h"
 #include "proc.h"
+# include "sysinfo.h"
 
 uint64
 sys_exit(void)
@@ -94,4 +95,40 @@ sys_uptime(void)
   xticks = ticks;
   release(&tickslock);
   return xticks;
+}
+
+// 新加的 kernel trace 函数
+uint64
+sys_trace(void)
+{
+  int mask;
+
+  //观察上面的代码可以知道 a0 存放了第一个参数
+  if (argint(0, &mask) < 0) // 读第一个参数（从内核的 a0 寄存器读）
+    return -1;
+
+  myproc()->trace_mask = mask; // 读完，放到 proc 里的 trace_mask，需要先声明在 proc.h
+  return 0;
+}
+
+// 新加的 kernel sysinfo 函数
+uint64
+sys_sysinfo(void)
+{
+  uint64 addr; // 存放 sysinfo 用户态传进来的参数（一个 info 结构体的 64 位地址）
+
+  if (argaddr(0, &addr) < 0)  // 从寄存器 a0，获取 64 位地址
+    return -1;
+
+  struct proc *p = myproc();
+  struct sysinfo info;  // kernel 中也申请一个结构体 info，最后通过 copyout 送回用户态
+
+  info.freemem = kfreemem_count();  // 调用自己写的计算 freemem 的函数，函数名写在 defs.h
+  info.nproc = nproc_count();       // 调用自己写的计算 nproc   的函数，函数名写在 defs.h
+  info.freefd = freefd_count();    // 调用自己写的计算 freefd   的函数，函数名写在 defs.h
+
+  // Copy sysinfo back to user space
+  if (copyout(p->pagetable, addr, (char *)&info, sizeof(info)) < 0) 
+    return -1;
+  return 0;
 }

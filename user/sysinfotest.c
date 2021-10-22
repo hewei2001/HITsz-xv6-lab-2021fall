@@ -7,7 +7,7 @@
 
 void
 sinfo(struct sysinfo *info) {
-  if (sysinfo(info) < 0) {
+  if (sysinfo(info) < 0) {  // 这里初次调用了 sysinfo，因此需要在 kernel 中加入相应函数，参数是 info 结构体
     printf("FAIL: sysinfo failed");
     exit(1);
   }
