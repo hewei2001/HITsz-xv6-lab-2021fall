@@ -1,8 +1,8 @@
-# <p align="center">HITsz-xv6-lab-2021fall</p>
+# HITsz-xv6-lab-2021fall
 
-<p align="center">哈工大（深圳）2021 年秋季学期「操作系统」[课程指导书](http://hitsz-lab.gitee.io/os-labs-2021/)</p>
+哈工大（深圳）2021 年秋季学期「操作系统」[课程指导书](http://hitsz-lab.gitee.io/os-labs-2021)
 
-<p align="center">原课程 xv6-mit-6.S081-2020 主页：[6.S081: Operating System Engineering](https://pdos.csail.mit.edu/6.S081/2020/index.html)</p>
+原课程 xv6-mit-6.S081-2020 主页：[6.S081: Operating System Engineering](https://pdos.csail.mit.edu/6.S081/2020/index.html)
 
 ## 实验内容
 
