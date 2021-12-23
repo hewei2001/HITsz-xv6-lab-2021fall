@@ -5,6 +5,8 @@
 #include "riscv.h"
 #include "defs.h"
 #include "fs.h"
+#include "spinlock.h"
+#include "proc.h"
 
 /*
  * the kernel's page table.
@@ -132,7 +134,7 @@ kvmpa(uint64 va)
   pte_t *pte;
   uint64 pa;
   
-  pte = walk(kernel_pagetable, va, 0);
+  pte = walk(myproc()->kernelpgtbl, va, 0);
   if(pte == 0)
     panic("kvmpa");
   if((*pte & PTE_V) == 0)
@@ -283,7 +285,7 @@ freewalk(pagetable_t pagetable)
       uint64 child = PTE2PA(pte);
       freewalk((pagetable_t)child);
       pagetable[i] = 0;  
-    } else if(pte & PTE_V){
+    } else if(pte & PTE_V){ // 叶子必须全被释放才能 free
       panic("freewalk: leaf");
     }
   }
@@ -380,23 +382,25 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 int
 copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
 {
-  uint64 n, va0, pa0;
+  // uint64 n, va0, pa0;
 
-  while(len > 0){
-    va0 = PGROUNDDOWN(srcva);
-    pa0 = walkaddr(pagetable, va0);
-    if(pa0 == 0)
-      return -1;
-    n = PGSIZE - (srcva - va0);
-    if(n > len)
-      n = len;
-    memmove(dst, (void *)(pa0 + (srcva - va0)), n);
+  // while(len > 0){
+  //   va0 = PGROUNDDOWN(srcva);       // 求出页的无偏虚拟地址
+  //   pa0 = walkaddr(pagetable, va0); // 找到页的物理地址
+  //   if(pa0 == 0)
+  //     return -1;
+  //   n = PGSIZE - (srcva - va0);
+  //   if(n > len) // 如果 len 不足这个页剩下的长度 n，则只需复制 len
+  //     n = len;
+  //   memmove(dst, (void *)(pa0 + (srcva - va0)), n);
 
-    len -= n;
-    dst += n;
-    srcva = va0 + PGSIZE;
-  }
-  return 0;
+  //   len -= n;
+  //   dst += n;
+  //   srcva = va0 + PGSIZE; // 继续到下一页
+  // }
+  // return 0;
+
+  return copyin_new(pagetable, dst, srcva, len);
 }
 
 // Copy a null-terminated string from user to kernel.
@@ -406,40 +410,42 @@ copyin(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len)
 int
 copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
 {
-  uint64 n, va0, pa0;
-  int got_null = 0;
+  // uint64 n, va0, pa0;
+  // int got_null = 0;
 
-  while(got_null == 0 && max > 0){
-    va0 = PGROUNDDOWN(srcva);
-    pa0 = walkaddr(pagetable, va0);
-    if(pa0 == 0)
-      return -1;
-    n = PGSIZE - (srcva - va0);
-    if(n > max)
-      n = max;
+  // while(got_null == 0 && max > 0){
+  //   va0 = PGROUNDDOWN(srcva);
+  //   pa0 = walkaddr(pagetable, va0);
+  //   if(pa0 == 0)
+  //     return -1;
+  //   n = PGSIZE - (srcva - va0);
+  //   if(n > max) // 如果 max 不足这个页剩下的长度 n，则只需复制 max
+  //     n = max;
 
-    char *p = (char *) (pa0 + (srcva - va0));
-    while(n > 0){
-      if(*p == '\0'){
-        *dst = '\0';
-        got_null = 1;
-        break;
-      } else {
-        *dst = *p;
-      }
-      --n;
-      --max;
-      p++;
-      dst++;
-    }
+  //   char *p = (char *) (pa0 + (srcva - va0));
+  //   while(n > 0){
+  //     if(*p == '\0'){
+  //       *dst = '\0';
+  //       got_null = 1;
+  //       break;
+  //     } else {
+  //       *dst = *p; // 逐字节复制
+  //     }
+  //     --n;
+  //     --max;
+  //     p++;
+  //     dst++;
+  //   }
 
-    srcva = va0 + PGSIZE;
-  }
-  if(got_null){
-    return 0;
-  } else {
-    return -1;
-  }
+  //   srcva = va0 + PGSIZE; // 继续到下一页
+  // }
+  // if(got_null){
+  //   return 0; // 正常结束，遇到 null
+  // } else {
+  //   return -1;// 非正常结束，达到 max
+  // }
+
+  return copyinstr_new(pagetable, dst, srcva, max);
 }
 
 // check if use global kpgtbl or not 
@@ -449,4 +455,114 @@ test_pagetable()
   uint64 satp = r_satp();
   uint64 gsatp = MAKE_SATP(kernel_pagetable);
   return satp != gsatp;
+}
+
+// Recursively print page-table pages.
+// 参照 freewalk()
+int pgtblprint(pagetable_t pagetable, int level) {
+  // there are 2^9 = 512 PTEs in a page table.
+  for(int i = 0; i < 512; i++){
+    pte_t pte = pagetable[i];
+    // 如果页表项有效，先打印页表项本身
+    if(pte & PTE_V) { 
+      printf("||");
+      for(int j = 0; j < level; j++) {
+        printf(" ||");
+      }
+      printf("%d: pte %p pa %p\n", i, pte, PTE2PA(pte));
+
+      // 如果该节点不是叶节点，递归打印其子节点
+      if((pte & (PTE_R|PTE_W|PTE_X)) == 0){
+        // this PTE points to a lower-level page table.
+        uint64 child = PTE2PA(pte);
+        pgtblprint((pagetable_t)child, level + 1);
+      }
+    }
+  }
+  return 0;
+}
+
+// 任务一：打印页表
+int vmprint(pagetable_t pagetable) {
+  printf("page table %p\n", pagetable);
+  return pgtblprint(pagetable, 0);
+}
+
+// 任务二：独立内核页表
+// create a direct-map page table for the kernel.
+// 仿造 kvminit()
+pagetable_t
+proc_kvminit()
+{
+  pagetable_t proc_kernel_pagetable;
+  proc_kernel_pagetable = (pagetable_t) kalloc();
+  memset(proc_kernel_pagetable, 0, PGSIZE);
+
+  // uart registers
+  proc_kvmmap(proc_kernel_pagetable, UART0, UART0, PGSIZE, PTE_R | PTE_W);
+
+  // virtio mmio disk interface
+  proc_kvmmap(proc_kernel_pagetable, VIRTIO0, VIRTIO0, PGSIZE, PTE_R | PTE_W);
+
+  // 不要映射CLINT，否则会在任务三发生地址重合问题
+  // proc_kvmmap(proc_kernel_pagetable, CLINT, CLINT, 0x10000, PTE_R | PTE_W);
+
+  // PLIC
+  proc_kvmmap(proc_kernel_pagetable, PLIC, PLIC, 0x400000, PTE_R | PTE_W);
+
+  // map kernel text executable and read-only.
+  proc_kvmmap(proc_kernel_pagetable, KERNBASE, KERNBASE, (uint64)etext-KERNBASE, PTE_R | PTE_X);
+
+  // map kernel data and the physical RAM we'll make use of.
+  proc_kvmmap(proc_kernel_pagetable, (uint64)etext, (uint64)etext, PHYSTOP-(uint64)etext, PTE_R | PTE_W);
+  
+  // map the trampoline for trap entry/exit to
+  // the highest virtual address in the kernel.
+  proc_kvmmap(proc_kernel_pagetable, TRAMPOLINE, (uint64)trampoline, PGSIZE, PTE_R | PTE_X);
+  
+  return proc_kernel_pagetable;
+}
+
+// add a mapping to the kernel page table.
+// 仿造 kvmmap()，对每个 proc 的内核页表单独 map
+void
+proc_kvmmap(pagetable_t pagetable, uint64 va, uint64 pa, uint64 sz, int perm)
+{
+  if(mappages(pagetable, va, sz, pa, perm) != 0)
+    panic("kvmmap");
+}
+
+
+// 任务三：简化软件模拟地址翻译
+// copy the user page table to kernel page table
+// 仿造 uvmcopy() 实现将 uvm 复制到 独立内核页表
+int
+u2kvmcopy(pagetable_t pagetable, pagetable_t kernelpgtbl, uint64 oldsz, uint64 newsz)
+{
+  pte_t *pte;
+  uint64 va, pa;
+  uint flags;
+   
+  if (newsz >= PLIC) // 超过 用户地址空间 的最大上限（溢出到内核了）
+    return -1;
+
+  oldsz = PGROUNDUP(oldsz);
+  newsz = PGROUNDUP(newsz); // 选择 UP 是因为 DOWN 已经有物理映射了
+
+  for (va = oldsz; va < newsz; va += PGSIZE)
+  {
+    if ((pte = walk(pagetable, va, 0)) == 0)
+      panic("u2kvmcopy: pte should exist");
+    if ((*pte & PTE_V) == 0)
+      panic("u2kvmcopy: page not present");
+    pa = PTE2PA(*pte);
+    flags = (PTE_FLAGS(*pte) & (~PTE_U)); // 将 user 位置 0 防止 kernel 无法访问
+    if(mappages(kernelpgtbl, va, PGSIZE, pa, flags) != 0) // 物理页帧不变，用 内核页表 指向之
+      goto err;
+  }
+  return 0;
+  
+ err:
+  uvmunmap(kernelpgtbl, oldsz, (va - oldsz) / PGSIZE, 0);
+  return -1;
 }

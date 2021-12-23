@@ -51,6 +51,10 @@ exec(char *path, char **argv)
     uint64 sz1;
     if((sz1 = uvmalloc(pagetable, sz, ph.vaddr + ph.memsz)) == 0)
       goto bad;
+    // 加载用户地址空间时，先判断复制到独立内核页表会不会溢出
+    if(sz1 >= PLIC) {
+      goto bad;
+    }
     sz = sz1;
     if(ph.vaddr % PGSIZE != 0)
       goto bad;
@@ -116,6 +120,16 @@ exec(char *path, char **argv)
   p->trapframe->sp = sp; // initial stack pointer
   proc_freepagetable(oldpagetable, oldsz);
 
+  
+  // 执行 exec() 前要替换进程镜像，将独立内核页表清空（不需要释放物理帧）
+  uvmunmap(p->kernelpgtbl, 0, PGROUNDUP(oldsz) / PGSIZE, 0);
+  // 清空后再把新的 页表 映射到 独立内核页表
+  u2kvmcopy(p->pagetable, p->kernelpgtbl, 0, p->sz);
+
+  // 在启动程序时（第一个进程）调用打印页表
+  if(p->pid == 1) 
+    vmprint(p->pagetable);
+  
   return argc; // this ends up in a0, the first argument to main(argc, argv)
 
  bad:
